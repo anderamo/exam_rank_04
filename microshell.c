@@ -1,12 +1,12 @@
 /* ************************************************************************** */
 /*                                                                            */
 /*                                                        :::      ::::::::   */
-/*   main.c                                             :+:      :+:    :+:   */
+/*   microshell.c                                       :+:      :+:    :+:   */
 /*                                                    +:+ +:+         +:+     */
 /*   By: aamorin- <aamorin-@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2021/12/06 16:30:05 by aamorin-          #+#    #+#             */
-/*   Updated: 2021/12/08 11:03:08 by aamorin-         ###   ########.fr       */
+/*   Updated: 2021/12/08 17:32:33 by aamorin-         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -15,6 +15,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 
+int	g_return = 0;
 
 typedef struct s_exe
 {
@@ -127,12 +128,15 @@ void	child(t_pipe pipex, char **envp, int i)
 	close(pipex.pipes[i + 1][1]);
 	if (!pipex.exe[i].c_split[0])
 		exit (127);
-	if (execve(pipex.exe[i].c_split[0], pipex.exe[i].c_split, envp) == -1)
+	else if (execve(pipex.exe[i].c_split[0], pipex.exe[i].c_split, envp) == -1)
 	{
+		write (2, "error: cannot execute ", 22);
+		write (2, pipex.exe[i].c_split[0], ft_strlen(pipex.exe[i].c_split[0]));
+		write (2, "\n", 1);
 		ft_frlloc(pipex.exe[i].c_split);
-		perror("execve");
 		exit (127);
 	}
+	exit (0);
 }
 
 int ft_execv(char **argv, int i, int *com_pos, char **envp)
@@ -144,6 +148,7 @@ int ft_execv(char **argv, int i, int *com_pos, char **envp)
 	int		command_pos;
 	int		index;
 	int		a;
+	int		status;
 	t_pipe	pipex;
 	
 	pipe_count = 1;
@@ -157,7 +162,7 @@ int ft_execv(char **argv, int i, int *com_pos, char **envp)
 		else if (!strcmp(argv[i], ";") || ft_arraybilen(argv) == i + 1)
 		{
 			*com_pos = *com_pos + 1;
-			break;
+			break ;
 		}
 	}
 	pipex = init_pipex(pipe_count, -1);
@@ -190,7 +195,7 @@ int ft_execv(char **argv, int i, int *com_pos, char **envp)
 			command_split_pos = 0;
 		}
 		else if (!strcmp(argv[index], ";"))
-			break;
+			break ;
 		else
 		{
 			command_pos = -1;
@@ -202,6 +207,22 @@ int ft_execv(char **argv, int i, int *com_pos, char **envp)
 		}
 	}
 	a = -1;
+	if (!strcmp(pipex.exe[0].c_split[0], "cd"))
+	{
+		a++;
+		if (ft_arraybilen(pipex.exe[0].c_split) > 2 || !pipex.exe[0].c_split[1])
+		{
+			write (2, "error: cd: bad arguments\n", 25);
+			exit (1);
+		}
+		else if (pipex.exe[0].c_split[1] && chdir(pipex.exe[0].c_split[1]))
+		{
+			write (2, "error: cd: cannot change directory to ", 38);
+			write (2, pipex.exe[0].c_split[1], ft_strlen(pipex.exe[0].c_split[1]));
+			write (2, "\n", 1);
+			exit (1);
+		}
+	}
 	close(pipex.pipes[0][0]);
 	close(pipex.pipes[pipex.procecess_num][1]);
 	while (++a < pipex.procecess_num)
@@ -211,6 +232,20 @@ int ft_execv(char **argv, int i, int *com_pos, char **envp)
 			break ;
 		if (pipex.pid[a] == 0)
 			child(pipex, envp, a);
+	}
+	a = -1;
+	while (++a < pipex.procecess_num + 1)
+	{
+		close(pipex.pipes[a][1]);
+		if (a != 0)
+			close(pipex.pipes[a][0]);
+	}
+	a = -1;
+	while (++a < pipex.procecess_num)
+	{
+		waitpid(pipex.pid[a], &status, 0);
+		if (WIFEXITED(status))
+			g_return = WEXITSTATUS(status);
 	}
 	a = -1;
 	free(pipex.pid);
@@ -245,12 +280,12 @@ int	main(int argc, char **argv, char **envp)
 	i = 0;
 	com_pos = -1;
 	if (argc == 1)
-		return (0);
+		return (g_return);
 	dot_comma = count(argv, ";");
 	while (dot_comma >= 0)
 	{
 		i = ft_execv(argv, i, &com_pos, envp);
 		dot_comma--;
 	}
-	return (0);
+	return (g_return);
 }
