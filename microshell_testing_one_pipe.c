@@ -1,12 +1,12 @@
 /* ************************************************************************** */
 /*                                                                            */
 /*                                                        :::      ::::::::   */
-/*   microshell_testing_one_pipe.c                      :+:      :+:    :+:   */
+/*   microshell.c                                       :+:      :+:    :+:   */
 /*                                                    +:+ +:+         +:+     */
 /*   By: aamorin- <aamorin-@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2021/12/06 16:30:05 by aamorin-          #+#    #+#             */
-/*   Updated: 2022/02/10 17:13:40 by aamorin-         ###   ########.fr       */
+/*   Updated: 2022/01/27 10:06:59 by aamorin-         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -15,9 +15,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-pid_t pid;
-int fd_in;
-int fd[2];
+int	g_return = 0;
 
 typedef struct s_exe
 {
@@ -27,6 +25,7 @@ typedef struct s_exe
 typedef struct s_pipe
 {
 	int		**pipes;
+	int		*pid;
 	int		*com_count;
 	int		procecess_num;
 	t_exe	*exe;
@@ -49,8 +48,11 @@ int	ft_strlen(char *str)
 	i = 0;
 	if (!str || str == NULL)
 		return (0);
-	while (str[i])
+	while (*str)
+	{
+		str++;
 		i++;
+	}
 	return (i);
 }
 
@@ -58,11 +60,27 @@ int	ft_frlloc(char **tab)
 {
 	int	i;
 
-	i = -1;
-	while (tab[++i])
+	i = 0;
+	while (tab[i])
+	{
 		free(tab[i]);
+		i++;
+	}
 	free(tab);
 	return (1);
+}
+
+void	ft_frlloc_int(int **tab, int size)
+{
+	int	i;
+
+	i = 0;
+	while (size > i)
+	{
+		free(tab[i]);
+		i++;
+	}
+	free(tab);
 }
 
 t_pipe	init_pipex(int a, int i)
@@ -70,44 +88,55 @@ t_pipe	init_pipex(int a, int i)
 	t_pipe	pipex;
 
 	pipex.procecess_num = a;
+	pipex.pipes = (int **)malloc((pipex.procecess_num + 1) * sizeof(int *));
 	pipex.exe = (t_exe *)malloc((pipex.procecess_num + 1) * sizeof(t_exe));
+	pipex.pid = (int *)malloc((pipex.procecess_num) * sizeof(int));
 	pipex.com_count = (int *)malloc((pipex.procecess_num + 1) * sizeof(int));
 	while (++i < pipex.procecess_num + 1)
 	{
 		pipex.com_count[i] = 0;
+		pipex.pipes[i] = (int *)malloc((2) * sizeof(int));
 		pipex.exe[i].c_split = NULL;
+		if (pipe(pipex.pipes[i]))
+		{
+			write (2, "error: fatal\n", 13);
+			//exit (0);
+		}
 	}
 	return (pipex);
 }
 
 void	child(t_pipe pipex, char **envp, int i)
 {
-	dup2(fd_in, 0);
-	if (i != pipex.procecess_num - 1)
-		dup2(fd[1], 1);
-	close(fd_in);
-	close(fd[1]);
-	close(fd[0]);
-	int pid = fork();
-	if (pid == -1)
+	int		j;
+
+	j = 0;
+	while (j < pipex.procecess_num + 1)
 	{
-		write (2, "error: fatal\n", 13);
-		exit(0);
+		if (j != i)
+        {
+            close(pipex.pipes[j][0]);
+        }
+		if (j != i + 1)
+        {
+            close(pipex.pipes[j][1]);
+        }
+		j++;
 	}
-	else if (pid == 0)
+	dup2(pipex.pipes[i][0], 0);
+	close(pipex.pipes[i][0]);
+	dup2(pipex.pipes[i + 1][1], 1);
+	close(pipex.pipes[i + 1][1]);
+	if (!pipex.exe[i].c_split[0])
+		exit (127);
+	else if (execve(pipex.exe[i].c_split[0], pipex.exe[i].c_split, envp) == -1)
 	{
-		if (!pipex.exe[i].c_split[0])
-			exit (127);
-		else if (execve(pipex.exe[i].c_split[0], pipex.exe[i].c_split, envp) == -1)
-		{
-			write (2, "error: cannot execute ", 22);
-			write (2, pipex.exe[i].c_split[0], ft_strlen(pipex.exe[i].c_split[0]));
-			write (2, "\n", 1);
-			ft_frlloc(pipex.exe[i].c_split);
-			exit (127);
-		}
+		write (2, "error: cannot execute ", 22);
+		write (2, pipex.exe[i].c_split[0], ft_strlen(pipex.exe[i].c_split[0]));
+		write (2, "\n", 1);
+		ft_frlloc(pipex.exe[i].c_split);
+		exit (127);
 	}
-	waitpid(0, NULL, 0);
 	exit (0);
 }
 
@@ -121,21 +150,28 @@ int ft_execv(char **argv, int i, char **envp)
             break ;
         }
     }
-	int		pipe_pos = 1;
-	int		command_split_pos = 0;
+	int		pipe_count;
+	int		pipe_pos;
+	int		command_split_pos;
 	int		command_pos;
-	int		index = i;
+	int		index;
+	int		a;
+	int		status;
+	t_pipe  pipex;
 
+	pipe_count = 1;
+	command_split_pos = 0;
+	pipe_pos = 0;
+	index = i;
 	while (argv[++i])
 	{
 		if (!strcmp(argv[i], "|"))
-			pipe_pos++;
+			pipe_count++;
 		else if (!strcmp(argv[i], ";") || ft_arraybilen(argv) < i)
 			break ;
 	}
-	t_pipe pipex = init_pipex(pipe_pos, -1);
+	pipex = init_pipex(pipe_count, -1);
 	i = index;
-	pipe_pos = 0;
 	while (argv[++i])
 	{
 		if (!strcmp(argv[i], "|"))
@@ -145,7 +181,7 @@ int ft_execv(char **argv, int i, char **envp)
 		else
 			pipex.com_count[pipe_pos] += 1;
 	}
-	int a = -1;
+	a = -1;
 	while (++a <= pipe_pos)
 	{
 		pipex.exe[a].c_split = (char **)malloc((pipex.com_count[a] + 1) * sizeof(char *));
@@ -171,6 +207,7 @@ int ft_execv(char **argv, int i, char **envp)
 			command_split_pos++;
 		}
 	}
+	a = -1;
 	if (pipex.exe[0].c_split[0])
 	{
 		if (!strcmp(pipex.exe[0].c_split[0], "cd"))
@@ -185,52 +222,40 @@ int ft_execv(char **argv, int i, char **envp)
 			}
 		}
 	}
-    if (pipe_pos == 0)
-    {
-        if ((pid = fork()) == 0)
-        {
-			if (!pipex.exe[0].c_split[0])
-				exit (127);
-            else if (execve(pipex.exe[0].c_split[0], pipex.exe[0].c_split, envp) < 0)
-            {
-                write (2, "error: cannot execute ", 22);
-                write (2, pipex.exe[0].c_split[0], ft_strlen(pipex.exe[0].c_split[0]));
-                write (2, "\n", 1);
-				exit (127);
-            }
+	close(pipex.pipes[0][0]);
+	close(pipex.pipes[pipex.procecess_num][1]);
+	while (++a < pipex.procecess_num)
+	{
+		pipex.pid[a] = fork();
+		if (pipex.pid[a] == -1)
+		{
+			write (2, "error: fatal\n", 13);
 			exit(0);
-        }
-        waitpid(0, NULL, 0);
-    }
-    else
-    {
-		a = -1;
-		fd_in = dup(0);
-        while (++a < pipex.procecess_num)
-        {
-            if (pipe(fd) == -1 || (pid = fork()) == -1)
-            {
-                write (2, "error: fatal\n", 13);
-                exit(0);
-            }
-            else if (pid == 0)
-                child(pipex, envp, a);
-            else
-            {
-				dup2(fd[0], fd_in);
-				close(fd[0]);
-        		close(fd[1]);
-            }
-        }
-		close(fd_in);
-    }
+		}
+		if (pipex.pid[a] == 0)
+			child(pipex, envp, a);
+	}
+	a = -1;
+	while (++a < pipex.procecess_num + 1)
+	{
+        if (a != pipex.procecess_num)
+		close(pipex.pipes[a][1]);
+		if (a != 0)
+			close(pipex.pipes[a][0]);
+	}
 	a = -1;
 	while (++a < pipex.procecess_num)
-		waitpid(0, NULL, 0);
+	{
+		waitpid(pipex.pid[a], &status, 0);
+		if (WIFEXITED(status))
+			g_return = WEXITSTATUS(status);
+	}
 	a = -1;
+	free(pipex.pid);
 	while (++a < pipex.procecess_num)
 		if (pipex.exe[a].c_split)
 			ft_frlloc(pipex.exe[a].c_split);
+	ft_frlloc_int(pipex.pipes, pipex.procecess_num + 1);
 	free(pipex.com_count);
 	free(pipex.exe);
 	return (i);
@@ -245,11 +270,11 @@ int	count(char **argv, char *c)
 	value = 0;
 	while (argv[++i])
 		if (!strcmp(argv[i], c))
-		{
-			value++;
-			while (ft_arraybilen(argv) > i && !strcmp(argv[i], c))
-				i++;
-		}
+        {
+            value++;
+            while (ft_arraybilen(argv) > i && !strcmp(argv[i], c))
+                i++;
+        }
 	return (value);
 }
 
@@ -260,14 +285,14 @@ int	main(int argc, char **argv, char **envp)
 
 	i = 0;
 	if (argc == 1)
-		return (0);
+		return (g_return);
 	dot_comma = count(argv, ";");
 	while (dot_comma >= 0)
 	{
 		i = ft_execv(argv, i, envp);
-		if (ft_arraybilen(argv) <= i || strcmp(argv[i], ";"))
-			return (0);
-		dot_comma--; 
+        if (ft_arraybilen(argv) <= i || strcmp(argv[i], ";"))
+            return (0);
+		dot_comma--;
 	}
-	return (0);
+	return (g_return);
 }
